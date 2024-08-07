@@ -1,0 +1,88 @@
+import nReadlines from 'n-readlines';
+import * as moment from 'moment';
+import * as path from 'path';
+
+export interface GetPositionDataRequest {
+    simulationName: string;
+    objectName: string;
+    body: string;
+    start: number;
+    stop: number;
+}   
+
+/**
+    * Returns position data for an object as calculated by a simulation.
+    * @param req The request query parameters includes the simulation name and object name.
+    * @param res The response includes all data position associated with the object.
+    */
+getPositionData = async (req: Request<unknown, unknown, unknown, GetPositionDataRequest>, res: Response) => {
+
+    const {
+        simulationName,
+        objectName,
+        body,
+        start,
+        stop
+    } = req.query;
+
+    try {
+        const fileName = objectName + "_" + body + ".txt";
+        const pathString = path.join(simulationName, fileName);
+        const filePath = path.resolve(simOutputRootDirectory, pathString);
+        const lines = new nReadlines(filePath);
+        const data = new Array<[number, number, number, number]>();
+
+        let line, parts;
+        let tIndex, x, y, z;
+        let t, epoch;
+        while ((line = lines.next())) {
+            line = line.toString('ascii');
+            if (line.startsWith('epoch=')) {
+                const epochString = line.split('=')[1];
+                epoch = moment.utc(epochString, "YYYY-MM-DD hh:mm:ss").toDate().getTime();
+            }
+            if (line[0] !== '0') {
+                continue;
+            } else {
+                break;
+            }
+        }
+        if (epoch == null)
+            throw new Error(`Epoch undefined`);
+        while (line) {
+            parts = line.trim().split(/\s+/);
+            tIndex = parseInt(parts[0]);
+            t = epoch + (tIndex * 1000);
+            if ((t >= start) && (t <= stop)) {
+                x = parseFloat(parts[1]);
+                y = parseFloat(parts[2]);
+                z = parseFloat(parts[3]);
+                data.push([tIndex, x, y, z])
+            }
+            if (t > stop) {
+                break;
+            }
+            line = lines.next();
+            if (line) {
+                line = line.toString('ascii');
+            }
+        }
+        if (line) {
+            try {
+                lines.close();
+            } catch (err: unknown) {
+                console.log('Line parsing failed, invalid value');
+            }
+        }
+
+
+        console.log(`${objectName}_${body}: ${start}-${stop} : ${data.length} positions`);
+
+        res.status(200).send(data);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } catch (err: any) {
+        const msg = `Failed to get position data ${simulationName}:${objectName} : ${err.toString()}`;
+        error(msg);
+        return serverError(res, msg);
+    }
+};
